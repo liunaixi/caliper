@@ -2,7 +2,7 @@ version: '2'
 
 services:
   ca.org1.example.com:
-    image: hyperledger/fabric-ca:1.2.0
+    image: hyperledger/fabric-ca:1.4.0
     environment:
       - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
       - FABRIC_CA_SERVER_CA_NAME=ca.org1.example.com
@@ -20,7 +20,7 @@ services:
     container_name: ca.org1.example.com
 
   ca.org2.example.com:
-    image: hyperledger/fabric-ca:1.2.0
+    image: hyperledger/fabric-ca:1.4.0
     environment:
       - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
       - FABRIC_CA_SERVER_CA_NAME=ca.org2.example.com
@@ -39,7 +39,7 @@ services:
 
   orderer.example.com:
     container_name: orderer.example.com
-    image: hyperledger/fabric-orderer:1.2.0
+    image: hyperledger/fabric-orderer:1.4.0
     environment:
       - ORDERER_GENERAL_LOGLEVEL=debug
       - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
@@ -63,7 +63,7 @@ services:
 
   peer0.org1.example.com:
     container_name: peer0.org1.example.com
-    image: hyperledger/fabric-peer:1.2.0
+    image: hyperledger/fabric-peer:1.4.0
     environment:
       - CORE_LOGGING_PEER=debug
       - CORE_CHAINCODE_LOGGING_LEVEL=DEBUG
@@ -97,7 +97,7 @@ services:
 
   peer0.org2.example.com:
     container_name: peer0.org2.example.com
-    image: hyperledger/fabric-peer:1.2.0
+    image: hyperledger/fabric-peer:1.4.0
     environment:
       - CORE_LOGGING_PEER=debug
       - CORE_CHAINCODE_LOGGING_LEVEL=DEBUG

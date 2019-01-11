@@ -50,7 +50,7 @@ module.exports.init = init;
  * @async
  */
 async function installChaincode(org, chaincode) {
-    Client.setConfigSetting('request-timeout', 60000);
+    Client.setConfigSetting('request-timeout', 240000);
     const channel_name = chaincode.channel;
 
     const client = new Client();
@@ -216,7 +216,7 @@ function buildChaincodeProposal(client, the_user, chaincode, upgrade, transientM
  * @async
  */
 async function instantiateChaincode(chaincode, endorsement_policy, upgrade){
-    Client.setConfigSetting('request-timeout', 120000);
+    Client.setConfigSetting('request-timeout', 240000);
 
     let channel = testUtil.getChannel(chaincode.channel);
     if(channel === null) {
