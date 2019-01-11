@@ -22,7 +22,7 @@ const fs = require('fs-extra');
 const util = require('util');
 
 const Client = require('fabric-client');
-const copService = require('fabric-ca-client/lib/FabricCAClientImpl.js');
+const copService = require('fabric-ca-client/lib/FabricCAServices.js');
 const User = require('fabric-client/lib/User.js');
 
 const Constants = require('./constant.js');
