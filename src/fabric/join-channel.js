@@ -20,7 +20,7 @@
 const fs = require('fs');
 
 const Client = require('fabric-client');
-const EventHub = require('fabric-client/lib/EventHub.js');
+const ChannelEventHub = require('fabric-client/lib/ChannelEventHub.js');
 
 const testUtil = require('./util.js');
 const commUtils = require('../comm/util');
@@ -29,17 +29,17 @@ const commlogger = commUtils.getLogger('join-channel.js');
 //let the_user = null;
 let tx_id = null;
 let ORGS;
-const allEventhubs = [];
+const allChannelEventhubs = [];
 
 /**
  * Disconnect from the given list of event hubs.
  * @param {object[]} ehs A collection of event hubs.
  */
-function disconnect(ehs) {
-    for(let key in ehs) {
-        const eventhub = ehs[key];
-        if (eventhub && eventhub.isconnected()) {
-            eventhub.disconnect();
+function disconnect(cehs) {
+    for(let key in cehs) {
+        const cEventhub = cehs[key];
+        if (cEventhub && cEventhub.isconnected()) {
+            cEventhub.disconnect();
         }
     }
 }
@@ -56,7 +56,7 @@ async function joinChannel(org, channelName) {
 
     const orgName = ORGS[org].name;
 
-    const targets = [], eventhubs = [];
+    const targets = [], cEventhubs = [];
 
     const caRootsPath = ORGS.orderer.tls_cacerts;
     let data = fs.readFileSync(commUtils.resolvePath(caRootsPath));
@@ -93,53 +93,32 @@ async function joinChannel(org, channelName) {
             }
 
             data = fs.readFileSync(commUtils.resolvePath(ORGS[org][key].tls_cacerts));
-            targets.push(
-                client.newPeer(
-                    ORGS[org][key].requests,
-                    {
-                        pem: Buffer.from(data).toString(),
-                        'ssl-target-name-override': ORGS[org][key]['server-hostname']
-                    }
-                )
-            );
-            let eh = new EventHub(client);
-            eh.setPeerAddr(
+            let peer = client.newPeer(
+                            ORGS[org][key].requests,
+                            {
+                                pem: Buffer.from(data).toString(),
+                                'ssl-target-name-override': ORGS[org][key]['server-hostname']
+                            }
+                        );
+            targets.push(peer);
+            let ceh = channel.newChannelEventHub(client.newPeer(
                 ORGS[org][key].events,
                 {
                     pem: Buffer.from(data).toString(),
                     'ssl-target-name-override': ORGS[org][key]['server-hostname']
                 }
-            );
-            eh.connect();
-            eventhubs.push(eh);
-            allEventhubs.push(eh);
+            ));
+            // eh.setPeerAddr(
+            //     ORGS[org][key].events,
+            //     {
+            //         pem: Buffer.from(data).toString(),
+            //         'ssl-target-name-override': ORGS[org][key]['server-hostname']
+            //     }
+            // );
+            ceh.connect();  // receive filtered blocks, connect(true) get the full blocks
+            cEventhubs.push(ceh);
+            allChannelEventhubs.push(ceh);
         }
-
-        const eventPromises = [];
-        eventhubs.forEach((eh) => {
-            let txPromise = new Promise((resolve, reject) => {
-                let handle = setTimeout(reject, 30000);
-
-                eh.registerBlockEvent((block) => {
-                    clearTimeout(handle);
-
-                    // in real-world situations, a peer may have more than one channel so
-                    // we must check that this block came from the channel we asked the peer to join
-                    if(block.data.data.length === 1) {
-                        // Config block must only contain one transaction
-                        const channel_header = block.data.data[0].payload.header.channel_header;
-                        if (channel_header.channel_id === channelName) {
-                            resolve();
-                        }
-                        else {
-                            reject(new Error('invalid channel name'));
-                        }
-                    }
-                });
-            });
-
-            eventPromises.push(txPromise);
-        });
 
         tx_id = client.newTransactionID();
         request = {
@@ -149,16 +128,52 @@ async function joinChannel(org, channelName) {
         };
 
         let sendPromise = channel.joinChannel(request);
+
+        const eventPromises = [];
+        cEventhubs.forEach((ceh) => {
+            let txPromise = new Promise((resolve, reject) => {
+                let handle = setTimeout(() => {
+                    ceh.unregisterTxEvent(tx_id);
+                    reject(new Error("Timed out waiting for block event"));
+                }, 30000);
+
+                ceh.registerTxEvent((tx_id, status, block_num) => {
+                    clearTimeout(handle);
+                    ceh.unregisterTxEvent(tx_id);
+                    console.log("*******status************ :: " + status);
+
+                    resolve(status);
+
+                    // in real-world situations, a peer may have more than one channel so
+                    // we must check that this block came from the channel we asked the peer to join
+                    // if(block.data.data.length === 1) {
+                    //     // Config block must only contain one transaction
+                    //     const channel_header = block.data.data[0].payload.header.channel_header;
+                    //     if (channel_header.channel_id === channelName) {
+                    //         resolve();
+                    //     }
+                    //     else {
+                    //         reject(new Error('invalid channel name'));
+                    //     }
+                    // }
+                }, (error) => {
+                    reject(new Error('fail to receive the block event: ' + error));
+                });
+            });
+
+            eventPromises.push(txPromise);
+        });
+
         let results = await Promise.all([sendPromise].concat(eventPromises));
 
-        disconnect(eventhubs);
+        disconnect(cEventhubs);
         if(results[0] && results[0][0] && results[0][0].response && results[0][0].response.status === 200) {
             commlogger.info(`Successfully joined ${orgName}'s peers to ${channelName}`);
         } else {
             throw new Error('Unexpected join channel response');
         }
     } catch (err) {
-        disconnect(eventhubs);
+        disconnect(cEventhubs);
         commlogger.error(`Couldn't join ${orgName}'s peers to ${channelName}: ${err.stack ? err.stack : err}`);
         throw err;
     }

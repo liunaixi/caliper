@@ -163,13 +163,13 @@ module.exports.installChaincode = installChaincode;
 
 /**
  * Disconnect from the given event hubs.
- * @param {object[]} ehs The collection of event hubs.
+ * @param {object[]} cehs The collection of event hubs.
  */
-function disconnect(ehs) {
-    for(let key in ehs) {
-        const eventhub = ehs[key];
-        if (eventhub && eventhub.isconnected()) {
-            eventhub.disconnect();
+function disconnect(cehs) {
+    for(let key in cehs) {
+        const cEventhub = cehs[key];
+        if (cEventhub && cEventhub.isconnected()) {
+            cEventhub.disconnect();
         }
     }
 }
@@ -226,7 +226,7 @@ async function instantiateChaincode(chaincode, endorsement_policy, upgrade){
     const userOrg = channel.organizations[0];
 
     let targets = [],
-        eventhubs = [];
+        cEventhubs = [];
     let type = 'instantiate';
     if(upgrade) {type = 'upgrade';}
     const client = new Client();
@@ -280,19 +280,31 @@ async function instantiateChaincode(chaincode, endorsement_policy, upgrade){
             }
         }
     }
-
-    // an event listener can only register with a peer in its own org
+    
     data = fs.readFileSync(commUtils.resolvePath(ORGS[userOrg][eventPeer].tls_cacerts));
-    let eh = client.newEventHub();
-    eh.setPeerAddr(
+    let ceh = channel.newChannelEventHub(client.newPeer(
         ORGS[userOrg][eventPeer].events,
         {
             pem: Buffer.from(data).toString(),
             'ssl-target-name-override': ORGS[userOrg][eventPeer]['server-hostname']
         }
-    );
-    eh.connect();
-    eventhubs.push(eh);
+    ));
+    ceh.connect();
+    cEventhubs.push(ceh);
+
+    
+
+    // an event listener can only register with a peer in its own org
+    // let eh = client.newEventHub();
+    // eh.setPeerAddr(
+    //     ORGS[userOrg][eventPeer].events,
+    //     {
+    //         pem: Buffer.from(data).toString(),
+    //         'ssl-target-name-override': ORGS[userOrg][eventPeer]['server-hostname']
+    //     }
+    // );
+    // eh.connect();
+    // eventhubs.push(eh);
 
     try {
         // read the config block from the orderer for the channel
@@ -363,25 +375,34 @@ async function instantiateChaincode(chaincode, endorsement_policy, upgrade){
         // set the transaction listener and set a timeout of 5 mins
         // if the transaction did not get committed within the timeout period,
         // fail the test
-        const deployId = tx_id.getTransactionID();
+        // const deployId = tx_id.getTransactionID();
 
         const eventPromises = [];
-        eventhubs.forEach((eh) => {
+        cEventhubs.forEach((ceh) => {
             let txPromise = new Promise((resolve, reject) => {
-                let handle = setTimeout(reject, 300000);
+                let handle = setTimeout(() => {
+                    ceh.unregisterTxEvent(tx_id);
+                    reject(new Error("Timed out waiting for block event"));
+                }, 30000);
 
-                eh.registerTxEvent(deployId.toString(), (tx, code) => {
+                ceh.registerTxEvent((tx_id, status, block_num) => {
                     clearTimeout(handle);
-                    eh.unregisterTxEvent(deployId);
-
-                    if (code !== 'VALID') {
-                        commLogger.warn('The chaincode ' + type + ' transaction was invalid, code = ' + code);
-                        reject();
-                    } else {
-                        commLogger.info('The chaincode ' + type + ' transaction was valid.');
-                        resolve();
+                    ceh.unregisterTxEvent(tx_id);
+                    
+                    resolve(status);
+                    // if (code !== 'VALID') {
+                    //     commLogger.warn('The chaincode ' + type + ' transaction was invalid, code = ' + code);
+                    //     reject();
+                    // } else {
+                    //     commLogger.info('The chaincode ' + type + ' transaction was valid.');
+                    //     resolve();
+                    // }
+                    }, (error) => {
+                        clearTimeout(handle);
+                        console.log('Failed to receive the transaction event :: ' + error);
+                        reject(error);
                     }
-                });
+                );
             });
             eventPromises.push(txPromise);
         });
@@ -401,7 +422,7 @@ async function instantiateChaincode(chaincode, endorsement_policy, upgrade){
             throw new Error('Failed to order the ' + type + 'transaction. Error code: ' + response.status);
         }
     } finally {
-        disconnect(eventhubs);
+        disconnect(cEventhubs);
     }
 }
 
@@ -445,7 +466,7 @@ async function getcontext(channelConfig, clientIdx) {
     const channel = client.newChannel(channel_name);
     let orgName = ORGS[userOrg].name;
     const cryptoSuite = Client.newCryptoSuite();
-    const eventhubs = [];
+    const cEventhubs = [];
     cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({path: testUtil.storePathForOrg(orgName)}));
     client.setCryptoSuite(cryptoSuite);
 
@@ -495,25 +516,26 @@ async function getcontext(channelConfig, clientIdx) {
 
         // an event listener can only register with the peer in its own org
         if(org === userOrg) {
-            let eh = client.newEventHub();
-            eh.setPeerAddr(
-                peerInfo.events,
-                {
-                    pem: Buffer.from(data).toString(),
-                    'ssl-target-name-override': peerInfo['server-hostname'],
-                    //'request-timeout': 120000
-                    'grpc.keepalive_timeout_ms' : 3000, // time to respond to the ping, 3 seconds
-                    'grpc.keepalive_time_ms' : 360000   // time to wait for ping response, 6 minutes
-                    // 'grpc.http2.keepalive_time' : 15
-                }
+            let ceh = channel.newChannelEventHub(
+                client.newPeer(
+                    peerInfo.events,
+                    {
+                        pem: Buffer.from(data).toString(),
+                        'ssl-target-name-override': peerInfo['server-hostname'],
+                        //'request-timeout': 120000
+                        'grpc.keepalive_timeout_ms' : 3000, // time to respond to the ping, 3 seconds
+                        'grpc.keepalive_time_ms' : 360000   // time to wait for ping response, 6 minutes
+                        // 'grpc.http2.keepalive_time' : 15
+                    }
+                )
             );
-            eventhubs.push(eh);
+            cEventhubs.push(ceh);
         }
     }
 
     // register event listener
-    eventhubs.forEach((eh) => {
-        eh.connect();
+    cEventhubs.forEach((ceh) => {
+        ceh.connect();
     });
 
     await channel.initialize();
@@ -523,7 +545,7 @@ async function getcontext(channelConfig, clientIdx) {
         client: client,
         channel: channel,
         submitter: the_user,
-        eventhubs: eventhubs
+        eventhubs: cEventhubs
     };
 }
 module.exports.getcontext = getcontext;
@@ -655,37 +677,51 @@ async function invokebycontext(context, id, version, args, timeout){
         }
 
         const eventPromises = [];
-        eventHubs.forEach((eh) => {
+        eventHubs.forEach((ceh) => {
             eventPromises.push(new Promise((resolve, reject) => {
                 let handle = setTimeout(() => reject(new Error('Timeout')), newTimeout);
+                ceh.registerTxEvent((tx, status, block_num) => {
+                    clearTimeout(handle);
+                    ceh.unregisterTxEvent(tx);
+                    invokeStatus.SetVerification(true);
+                    //commLogger.info("the return status is:" + status);
+                    resolve(status);
+                }, (error) => {
+                    clearTimeout(handle);
+                    errFlag |= TxErrorEnum.EventNotificationError;
+                    invokeStatus.SetFlag(errFlag);
+                    invokeStatus.SetErrMsg(TxErrorIndex.EventNotificationError, err.toString());
+                    resolve();
+                });
 
-                eh.registerTxEvent(txId,
-                    (tx, code) => {
-                        clearTimeout(handle);
-                        eh.unregisterTxEvent(txId);
 
-                        // either explicit invalid event or valid event, verified in both cases by at least one peer
-                        invokeStatus.SetVerification(true);
-                        if (code !== 'VALID') {
-                            let err = new Error('Invalid transaction: ' + code);
-                            errFlag |= TxErrorEnum.BadEventNotificationError;
-                            invokeStatus.SetFlag(errFlag);
-                            invokeStatus.SetErrMsg(TxErrorIndex.BadEventNotificationError, err.toString());
-                            reject(err); // handle error in final catch
-                        } else {
-                            resolve();
-                        }
-                    },
-                    (err) => {
-                        clearTimeout(handle);
-                        // we don't know what happened, but give the other eventhub connections a chance
-                        // to verify the Tx status, so resolve this call
-                        errFlag |= TxErrorEnum.EventNotificationError;
-                        invokeStatus.SetFlag(errFlag);
-                        invokeStatus.SetErrMsg(TxErrorIndex.EventNotificationError, err.toString());
-                        resolve();
-                    }
-                );
+                // eh.registerTxEvent(txId,
+                //     (tx, code) => {
+                //         clearTimeout(handle);
+                //         eh.unregisterTxEvent(txId);
+
+                //         // either explicit invalid event or valid event, verified in both cases by at least one peer
+                //         invokeStatus.SetVerification(true);
+                //         if (code !== 'VALID') {
+                //             let err = new Error('Invalid transaction: ' + code);
+                //             errFlag |= TxErrorEnum.BadEventNotificationError;
+                //             invokeStatus.SetFlag(errFlag);
+                //             invokeStatus.SetErrMsg(TxErrorIndex.BadEventNotificationError, err.toString());
+                //             reject(err); // handle error in final catch
+                //         } else {
+                //             resolve();
+                //         }
+                //     },
+                //     (err) => {
+                //         clearTimeout(handle);
+                //         // we don't know what happened, but give the other eventhub connections a chance
+                //         // to verify the Tx status, so resolve this call
+                //         errFlag |= TxErrorEnum.EventNotificationError;
+                //         invokeStatus.SetFlag(errFlag);
+                //         invokeStatus.SetErrMsg(TxErrorIndex.EventNotificationError, err.toString());
+                //         resolve();
+                //     }
+                // );
             }));
         });
 
