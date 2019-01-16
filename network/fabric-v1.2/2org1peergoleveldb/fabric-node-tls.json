@@ -56,8 +56,8 @@
       }
     ],
     "chaincodes": [
-      {"id": "marbles", "path": "src/contract/fabric/marbles-norichquery/node", "language":"node", "version": "v1", "channel": "mychannel"},
-      {"id": "simple", "path": "src/contract/fabric/simple/node", "language":"node", "version": "v0", "channel": "mychannel"}
+      {"id": "marbles", "path": "contract/fabric/marbles-norichquery/go", "language":"golang", "version": "v1", "channel": "mychannel"},
+      {"id": "simple", "path": "contract/fabric/simple/go", "language":"golang", "version": "v0", "channel": "mychannel"}
     ],
     "endorsement-policy": {
       "identities": [
